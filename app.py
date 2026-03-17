@@ -39,6 +39,20 @@ def tg_edit_message_reply_markup(chat_id, message_id, reply_markup):
     resp = requests.post(f"{BASE_URL}/editMessageReplyMarkup", json=payload)
     resp.raise_for_status()
     return resp.json()
+    @app.route("/call-waiter", methods=["POST"])
+    
+def receive_call_waiter():
+    """Called by the website when a customer calls the waiter."""
+    if not request.is_json:
+        return jsonify({"error": "JSON required"}), 400
+
+    data = request.get_json()
+    table_number = data.get("table", "?")
+    text = f"🔔 La table {table_number} appelle le serveur."
+
+    # Send to waiter chat
+    tg_send_message(CHAT_WAITER, text)
+    return jsonify({"status": "ok"})
 
 @app.route("/send-order", methods=["POST"])
 def receive_order():
