@@ -6,6 +6,7 @@ from flask import Flask, request, jsonify
 from threading import Lock
 
 app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 # --- Configuration (set as env vars in Render) ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
