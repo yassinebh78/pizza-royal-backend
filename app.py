@@ -77,16 +77,19 @@ def receive_order():
     table_number = data.get("table", "?")
     items = data.get("items", [])
     total = data.get("total", 0)
+    notes = data.get("notes", "").strip()
 
     # NEW: get today's order number
     order_no = next_order_number()
 
     # Build message text (visible to waiter)
     lines = [f"🛒 Commande #{order_no} - Table {table_number}:"]
-    for it in items:
-        lines.append(f"• {it['name']} x{it['qty']} — {it['price']:.1f}DT")
-    lines.append(f"\n💰 Total : {total:.1f}DT")
-    text = "\n".join(lines)
+for it in items:
+    lines.append(f"• {it['name']} x{it['qty']} — {it['price']:.1f}DT")
+lines.append(f"\n💰 Total : {total:.1f}DT")
+if notes:
+    lines.append(f"\n📝 Notes : {notes}")
+text = "\n".join(lines)
 
     keyboard = {
         "inline_keyboard": [
@@ -106,6 +109,7 @@ def receive_order():
             "table": table_number,
             "items": items,
             "total": total,
+            "notes": notes,
             "waiter_chat_id": CHAT_WAITER,
             "original_text": text
         }
