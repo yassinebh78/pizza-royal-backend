@@ -19,7 +19,7 @@ order_lock = Lock()
 current_day = date.today().isoformat()
 today_counter = 0
 
-# Pending orders ← ADD THESE 3 LINES
+# Pending orders
 pending_lock = Lock()
 pending_orders = 0
 
@@ -38,9 +38,9 @@ def calc_wait_time(count: int) -> int:
     """Step‑wise rule: <7 →15 min, 7‑10 →30 min, >10 →45 min."""
     if count < 7:
         return 15
-    if count <= 10:   # 7 … 10 inclusive
+    if count <= 10:
         return 30
-    return 45         # > 10
+    return 45
 
 # ===== Routes =====
 @app.route('/')
@@ -75,7 +75,7 @@ def send_order():
         if notes: line += f" ({notes})"
         lines.append(line)
     lines.extend(["", f"💰 Total: {total:.1f}DT", ""])
-    tg_text = "\n".join(lines)
+    tg_text = "\n".join(lines)  # ← FIXED: single \, not double \\
 
     # 3️⃣ Send to waiter WITH Accept/Refuse buttons
     keyboard = {
@@ -93,7 +93,7 @@ def send_order():
             json={
                 "chat_id": CHAT_WAITER,
                 "text": tg_text,
-                "reply_markup": keyboard  # ← THIS WAS MISSING!
+                "reply_markup": keyboard
             },
             timeout=10
         )
@@ -146,16 +146,13 @@ def order_done():
     Called by the kitchen when an order has been finished.
     Decrements the pending‑order counter so the next wait‑time estimate stays accurate.
     """
-    # No JSON validation needed - kitchen just sends empty POST
     with pending_lock:
         global pending_orders
         if pending_orders > 0:
             pending_orders -= 1
             app.logger.info(f"Order completed. Pending now: {pending_orders}")
-    
     return jsonify({"status": "ok"})
 
-# ===== Entrypoint =====
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
