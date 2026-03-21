@@ -9,15 +9,19 @@ from datetime import date
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# ===== Environment variables (set in Render) =====
+# Environment variables
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_WAITER = os.getenv("CHAT_WAITER")   # waiter chat ID
-CHAT_KITCHEN = os.getenv("CHAT_KITCHEN") # kitchen chat ID (if you forward elsewhere)
+CHAT_WAITER = os.getenv("CHAT_WAITER")
+CHAT_KITCHEN = os.getenv("CHAT_KITCHEN")
 
-# ===== Per‑day order number =====
+# Per‑day order number
 order_lock = Lock()
 current_day = date.today().isoformat()
 today_counter = 0
+
+# Pending orders ← ADD THESE 3 LINES
+pending_lock = Lock()
+pending_orders = 0
 
 def get_today_order_number():
     """Returns a monotonically increasing order number that resets at midnight."""
@@ -29,10 +33,6 @@ def get_today_order_number():
             today_counter = 0
         today_counter += 1
         return today_counter
-
-# ===== Pending orders (for wait‑time estimation) =====
-pending_lock = Lock()
-pending_orders = 0   # how many orders are currently waiting for preparation
 
 def calc_wait_time(count: int) -> int:
     """Step‑wise rule: <7 →15 min, 7‑10 →30 min, >10 →45 min."""
@@ -138,15 +138,13 @@ def order_done():
     Called by the kitchen when an order has been finished.
     Decrements the pending‑order counter so the next wait‑time estimate stays accurate.
     """
-    if not request.is_json:
-        return jsonify({"error": "Invalid JSON"}), 400
-    # No need to inspect the payload; we just decrement the counter.
+    # No JSON validation needed - kitchen just sends empty POST
     with pending_lock:
         global pending_orders
         if pending_orders > 0:
             pending_orders -= 1
-        # Optional logging for debugging:
-        # app.logger.info(f"Order done, pending now: {pending_orders}")
+            app.logger.info(f"Order completed. Pending now: {pending_orders}")
+    
     return jsonify({"status": "ok"})
 
 # ===== Entrypoint =====
