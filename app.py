@@ -49,7 +49,7 @@ def index():
 
 @app.route('/send-order', methods=['POST'])
 def send_order():
-    """Receive order from frontend, notify waiter, and return order number + wait estimate."""
+    """Receive order from frontend, notify waiter with Accept/Refuse buttons."""
     if not request.is_json:
         return jsonify({"error": "Invalid JSON"}), 400
 
@@ -59,52 +59,60 @@ def send_order():
     table_number = data.get('table_number')
 
     if not items or total <= 0 or table_number is None:
-        return jsonify({"error": "Missing items, total, or table_number"}), 400
+        return jsonify({"error": "Missing data"}), 400
 
-    # Build Telegram message for waiter/kitchen
+    # 1️⃣ Generate order number
     order_no = get_today_order_number()
-    lines = [f"🛒 Commande - Table {table_number}:"]
+    
+    # 2️⃣ Build order text
+    lines = [f"🛒 Commande #{order_no} - Table {table_number}:"]
     for it in items:
-        name = it.get('name', 'Sans nom')
+        name = it.get('name', 'Inconnu')
         qty = it.get('qty', 0)
         price = float(it.get('price', 0))
-        notes = it.get('notes', '').strip()
-        line_total = qty * price
+        notes = it.get('notes', '')
         line = f"• {name} x{qty} — {price:.1f}DT"
-        if notes:
-            line += f" ({notes})"
+        if notes: line += f" ({notes})"
         lines.append(line)
-    lines.append("")
-    lines.append(f"💰 Total : {total:.1f}DT")
+    lines.extend(["", f"💰 Total: {total:.1f}DT", ""])
     tg_text = "\n".join(lines)
 
-    # Send to waiter (Telegram)
+    # 3️⃣ Send to waiter WITH Accept/Refuse buttons
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "✅ Accepter", "callback_data": f"accept_{order_no}"},
+                {"text": "❌ Refuser", "callback_data": f"refuse_{order_no}"}
+            ]
+        ]
+    }
+    
     try:
         tg_resp = requests.post(
             f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            json={"chat_id": CHAT_WAITER, "text": tg_text},
+            json={
+                "chat_id": CHAT_WAITER,
+                "text": tg_text,
+                "reply_markup": keyboard  # ← THIS WAS MISSING!
+            },
             timeout=10
         )
         tg_resp.raise_for_status()
-        tg_data = tg_resp.json()
-        if not tg_data.get('ok'):
-            raise Exception(f"Telegram error: {tg_data}")
-        message_id = tg_data['result']['message_id']
+        message_id = tg_resp.json()['result']['message_id']
     except Exception as e:
-        app.logger.error(f"Failed to notify waiter: {e}")
-        return jsonify({"error": "Failed to notify waiter"}), 500
+        app.logger.error(f"Telegram failed: {e}")
+        return jsonify({"error": "Telegram notification failed"}), 500
 
-    # Update pending‑order counter and compute wait time
+    # 4️⃣ Update pending counter & return JSON
     with pending_lock:
         pending_orders += 1
         wait_min = calc_wait_time(pending_orders)
 
-    # Respond to frontend
     return jsonify({
         "status": "ok",
         "telegram_message_id": message_id,
         "order_no": order_no,
-        "estimated_wait_min": wait_min   # <-- new field for the frontend
+        "estimated_wait_min": wait_min
     })
 
 @app.route('/call-waiter', methods=['POST'])
