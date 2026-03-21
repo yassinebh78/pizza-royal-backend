@@ -5,7 +5,18 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from threading import Lock
 from datetime import date
+from threading import Lock
 
+PENDING_LOCK = Lock()
+pending_orders = 0          # number of orders waiting for preparation
+
+# Step‑wise waiting‑time rule
+def calc_wait_time(count: int) -> int:
+    if count < 7:
+        return 15
+    if count <= 10:          # 7 … 10
+        return 30
+    return 45                # > 10
 # ...
 
 pending_orders = {}
@@ -113,12 +124,17 @@ def receive_order():
             "waiter_chat_id": CHAT_WAITER,
             "original_text": text
         }
+    #   Increment pending orders (thread‑safe)
+    with PENDING_LOCK:
+        pending_orders += 1
+        wait_min = calc_wait_time(pending_orders)
 
     # Include order_no so client can see it
     return jsonify({
         "status": "ok",
         "telegram_message_id": message_id,
         "order_no": order_no
+        "estimated_wait_min": wait_min
     })
 
 
