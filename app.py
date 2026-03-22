@@ -1,9 +1,21 @@
 import os
+import os
 import json
 import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from threading import Lock
+from datetime import date
+
+# ...
+
+pending_orders = {}
+pending_lock = Lock()
+
+# Daily order counter
+current_day = date.today().isoformat()
+today_counter = 0
+
 
 app = Flask(__name__)
 # Allow calls from your GitHub Pages site (and others). For now we allow all.
@@ -23,6 +35,15 @@ BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 pending_orders = {}
 pending_lock = Lock()
 
+def next_order_number():
+    """Return today's next order number and reset counter if day changed."""
+    global current_day, today_counter
+    today_str = date.today().isoformat()
+    if today_str != current_day:
+        current_day = today_str
+        today_counter = 0
+    today_counter += 1
+    return today_counter
 
 def tg_send_message(chat_id, text, reply_markup=None):
     payload = {
@@ -50,7 +71,6 @@ def tg_edit_message_reply_markup(chat_id, message_id, reply_markup):
 
 @app.route("/send-order", methods=["POST"])
 def receive_order():
-    """Called by the website when a customer sends an order."""
     if not request.is_json:
         return jsonify({"error": "JSON required"}), 400
 
@@ -58,39 +78,56 @@ def receive_order():
     table_number = data.get("table", "?")
     items = data.get("items", [])
     total = data.get("total", 0)
+    notes = data.get("notes", "").strip()
 
-    # Build message text
-    lines = [f"🛒 Commande - Table {table_number}:"]
+    # NEW: get today's order number
+    order_no = next_order_number()
+
+    # Build message text (visible to waiter)
+    lines = [f"🛒 Commande #{order_no} - Table {table_number}:"]
+for it in items:
+    lines.append(f"• {it['name']} x{it['qty']} — {it['price']:.1f}DT")
+lines.append(f"\n💰 Total : {total:.1f}DT")
+if notes:
+    lines.append(f"\n📝 Notes : {notes}")
+text = "\n".join(lines)
     for it in items:
         lines.append(f"• {it['name']} x{it['qty']} — {it['price']:.1f}DT")
     lines.append(f"\n💰 Total : {total:.1f}DT")
+    if notes:
+        lines.append(f"\n📝 Notes : {notes}")
     text = "\n".join(lines)
 
-    # Inline keyboard for waiter
     keyboard = {
         "inline_keyboard": [
             [
-                {"text": "✅ Accepter", "callback_data": "accept_"},
-                {"text": "❌ Refuser",  "callback_data": "refuse_"}
+                {"text": "✅ Accepter", "callback_data": f"accept_{order_no}"},
+                {"text": "❌ Refuser",  "callback_data": f"refuse_{order_no}"}
             ]
         ]
     }
 
-    # Send to waiter
     tg_resp = tg_send_message(CHAT_WAITER, text, reply_markup=keyboard)
     message_id = tg_resp["result"]["message_id"]
 
-    # Save order so we know what to do when waiter clicks
     with pending_lock:
         pending_orders[message_id] = {
+            "order_no": order_no,              # store it
             "table": table_number,
             "items": items,
             "total": total,
+            "notes": notes,
             "waiter_chat_id": CHAT_WAITER,
             "original_text": text
         }
 
-    return jsonify({"status": "ok", "telegram_message_id": message_id})
+    # Include order_no so client can see it
+    return jsonify({
+        "status": "ok",
+        "telegram_message_id": message_id,
+        "order_no": order_no
+    })
+
 
 
 @app.route("/call-waiter", methods=["POST"])
@@ -109,7 +146,6 @@ def receive_call_waiter():
 
 @app.route("/webhook", methods=["POST"])
 def telegram_webhook():
-    """Telegram sends updates here (for Accept / Refuse buttons)."""
     update = request.get_json(force=True)
     if not update:
         return jsonify({"ok": False})
@@ -118,11 +154,14 @@ def telegram_webhook():
         return jsonify({"ok": True})
 
     cq = update["callback_query"]
-    data = cq["data"]
+    data = cq["data"]              # e.g. "accept_5"
     message_id = cq["message"]["message_id"]
     chat_id = cq["message"]["chat"]["id"]
 
-    action = data.split("_")[0]  # "accept" or "refuse"
+    # data format: "<action>_<order_no>"
+    parts = data.split("_")
+    action = parts[0]              # "accept" or "refuse"
+    order_no = parts[1] if len(parts) > 1 else "?"
 
     with pending_lock:
         order = pending_orders.pop(message_id, None)
@@ -136,13 +175,16 @@ def telegram_webhook():
         return jsonify({"ok": True})
 
     if action == "accept":
-        kitchen_text = f"✅ Commande acceptée (Table {order['table']}):\n{order['original_text']}"
+        kitchen_text = (
+            f"✅ Commande #{order['order_no']} acceptée "
+            f"(Table {order['table']}):\n{order['original_text']}"
+        )
         tg_send_message(CHAT_KITCHEN, kitchen_text)
 
         tg_edit_message_reply_markup(chat_id, message_id, reply_markup={"inline_keyboard": []})
         requests.post(f"{BASE_URL}/answerCallbackQuery", json={
             "callback_query_id": cq["id"],
-            "text": "Commande acceptée et envoyée en cuisine.",
+            "text": f"Commande #{order['order_no']} envoyée en cuisine.",
             "show_alert": False
         })
 
@@ -150,12 +192,11 @@ def telegram_webhook():
         tg_edit_message_reply_markup(chat_id, message_id, reply_markup={"inline_keyboard": []})
         requests.post(f"{BASE_URL}/answerCallbackQuery", json={
             "callback_query_id": cq["id"],
-            "text": "Commande refusée.",
+            "text": f"Commande #{order['order_no']} refusée.",
             "show_alert": True
         })
 
     return jsonify({"ok": True})
-
 
 @app.route("/")
 def index():
