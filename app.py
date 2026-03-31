@@ -251,7 +251,6 @@ def receive_order():
         }
         save_order_status(
             order_no,
-            order_no=order_no,
             table=table_number,
             status="received",
             waiting_time_minutes=None,
@@ -360,7 +359,6 @@ def telegram_webhook():
             order["status"] = "accepted"
             save_order_status(
                 order["order_no"],
-                order_no=order["order_no"],
                 table=order["table"],
                 status="accepted",
                 waiting_time_minutes=None,
@@ -409,7 +407,6 @@ def telegram_webhook():
             pending_orders.pop(message_id, None)
             save_order_status(
                 order["order_no"],
-                order_no=order["order_no"],
                 table=order["table"],
                 status="preparing",
                 waiting_time_minutes=int(wait_minutes),
@@ -439,7 +436,6 @@ def telegram_webhook():
             pending_orders.pop(message_id, None)
             save_order_status(
                 order["order_no"],
-                order_no=order["order_no"],
                 table=order["table"],
                 status="refused",
                 waiting_time_minutes=None,
